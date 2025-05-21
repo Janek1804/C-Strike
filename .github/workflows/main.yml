@@ -1,0 +1,15 @@
+on:
+  push:
+    branches:
+    - main
+    - release/*
+  pull_request:
+    branches:
+    - main
+jobs:
+  my_job:
+    name: build
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4.2.2
+    - run: gcc C-Strike.c -o C-Strike
