@@ -1,3 +1,5 @@
+//C-Strike: a security research for flooding
+//Copyright (C) 2025  Jan Kałucki
 #include <stdio.h>
 #include <ctype.h>
 #include <stdlib.h>

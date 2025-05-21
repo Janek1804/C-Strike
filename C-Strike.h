@@ -1,3 +1,5 @@
+//C-Strike: a security research for flooding
+//Copyright (C) 2025  Jan Kałucki
 struct pseudo_header {
     u_int32_t source_address;
     u_int32_t dest_address;
