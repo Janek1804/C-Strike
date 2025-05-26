@@ -11,6 +11,7 @@
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <netinet/ip.h>
+#include <netdb.h>
 #include "C-Strike.h"
 
 int opts;
