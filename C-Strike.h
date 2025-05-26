@@ -8,6 +8,11 @@ struct pseudo_header {
     u_int8_t protocol;
     u_int16_t tcp_length;
 };
+struct icmp_header{
+    u_int8_t type;
+    u_int8_t code;
+    u_int16_t checksum;
+};
 int SYN_flood(char* target,unsigned short port,unsigned int msg_len, time_t duration);
 int UDP_flood(char* target,unsigned short port,unsigned int msg_len, time_t duration);
 int ICMP_flood(char* target,unsigned short port,unsigned int msg_len, time_t duration);

