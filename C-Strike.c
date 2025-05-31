@@ -21,6 +21,7 @@ unsigned int n_proc=4;
 unsigned int duration=10;
 unsigned int pkt_len =1000;
 unsigned short port = 80;
+char* port_range;
 char* target = "127.0.0.1";
 char* type ="UDP flooding";
 
@@ -268,11 +269,52 @@ int HTTP_flood(char *target, unsigned short port, unsigned int msg_len, time_t d
     close(sock);
     return 0;
 }
+
+int port_scan(char* target, unsigned short port_min, unsigned short port_max){
+    struct hostent *server = gethostbyname(target);
+    if (!server) {
+        fprintf(stderr,"Failed to resolve host: %s\n", target);
+        return 1;
+    }
+    struct sockaddr_in server_addr;
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr = *((struct in_addr *)server->h_addr);
+    memset(&(server_addr.sin_zero), 0, 8);
+    for(int i = port_min; i<= port_max;i++){
+        int sock = socket(AF_INET, SOCK_STREAM,0);
+        if(sock < 0){
+            perror("Failed to create socket");
+            return 2;
+        }
+        char buffer[256];
+        server_addr.sin_port = htons(i);
+        if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+            fprintf(stderr,"Connection failed: Port %d closed", i);
+            close(sock);
+            return 3;
+        }
+        else{
+            printf("Port %d open.\n",i);
+        }
+        if(i == 22){
+            ssize_t received = recv(sock, buffer, 255, 0);
+            if (received < 0) {
+                perror("Failed to read banner.");
+                close(sock);
+                return 4;
+            }
+            buffer[received] = '\0';
+            printf("SSH Banner: %s\n", buffer);
+        }
+    }
+    return 0;
+}
+
 void run_processes(int n, int (*func)(char*, unsigned short, unsigned int, time_t), char *target, unsigned short port, unsigned int msg_len, time_t duration) {
     for (int i = 0; i < n; i++) {
         pid_t pid = fork();
         if (pid < 0) {
-            perror("fork failed");
+            perror("fork failed\n");
             exit(EXIT_FAILURE);
         } else if (pid == 0) {
             func(target,port,msg_len,duration);
@@ -295,8 +337,12 @@ int main(int argc, char** argv){
 				type = optarg;
 			break;
 			case 'p':
+                if(!strcmp(type,"Scan")){
+                    port_range = optarg;
+                    break;
+                }
 				port = (unsigned short)atoi(optarg);
-
+                break;
 			case 'n':
 				n_proc = (unsigned int)(atoi(optarg));
 			break;
@@ -306,7 +352,7 @@ int main(int argc, char** argv){
 				pkt_len = (unsigned int)(atoi(optarg));
 			case '?':
 				fprintf(stderr,
-				"Usage: C-Strike [-T target] [-t type] [-n n_processes] [-d duration] [-l packet length]");
+				"Usage: C-Strike [-T target] [-t type] [-p port number] [-n n_processes] [-d duration] [-l packet length]");
 				return 1;
 			break;
 		
@@ -326,6 +372,18 @@ int main(int argc, char** argv){
 	else if (!strcmp(type,"HTTP")) {
 		run_processes(n_proc, HTTP_flood, target, port, pkt_len, duration);
 	}
+    else if (!strcmp(type,"Scan")) {
+        unsigned short port_min, port_max;
+        if(sscanf(port_range,"%d-%d",&port_min,&port_max) != 2){
+            perror("Failed to parse port range.\n");
+            return 2;
+        }
+        if(port_max < port_min || port_max>65535){
+            perror("Invalid port range.\n");
+            return 3;
+        }
+        port_scan(target,port_min,port_max);
+    }
 
 	return 0;
 }

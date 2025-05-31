@@ -17,3 +17,4 @@ int SYN_flood(char* target,unsigned short port,unsigned int msg_len, time_t dura
 int UDP_flood(char* target,unsigned short port,unsigned int msg_len, time_t duration);
 int ICMP_flood(char* target,unsigned short port,unsigned int msg_len, time_t duration);
 int HTTP_flood(char* target,unsigned short port, unsigned int msg_len, time_t duration);
+int port_scan(char* target, unsigned short port_min, unsigned short port_max);
